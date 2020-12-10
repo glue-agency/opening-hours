@@ -19,6 +19,9 @@ class OpeningHours
     /** @var \Spatie\OpeningHours\Day[] */
     protected $openingHours = [];
 
+    /** @var \Spatie\OpeningHours\ClosingPeriod[] */
+    protected $closingPeriods = [];
+
     /** @var \Spatie\OpeningHours\OpeningHoursForDay[] */
     protected $exceptions = [];
 
@@ -133,11 +136,13 @@ class OpeningHours
 
     public function fill(array $data)
     {
-        list($openingHours, $exceptions, $metaData, $filters) = $this->parseOpeningHoursAndExceptions($data);
+        list($openingHours, $closingPeriods, $exceptions, $metaData, $filters) = $this->parseOpeningHoursAndExceptions($data);
 
         foreach ($openingHours as $day => $openingHoursForThisDay) {
             $this->setOpeningHoursFromStrings($day, $openingHoursForThisDay);
         }
+
+        $this->setClosingPeriodsFromStrings($closingPeriods);
 
         $this->setExceptionsFromStrings($exceptions);
 
@@ -183,6 +188,12 @@ class OpeningHours
     {
         $date = $this->applyTimezone($date);
 
+        foreach($this->closingPeriods as $period) {
+            if($period->isInRange($date)) {
+                return OpeningHoursForDay::fromStrings([]);
+            }
+        }
+
         foreach ($this->filters as $filter) {
             $result = $filter($date);
 
@@ -192,6 +203,11 @@ class OpeningHours
         }
 
         return $this->exceptions[$date->format('Y-m-d')] ?? ($this->exceptions[$date->format('m-d')] ?? $this->forDay(Day::onDateTime($date)));
+    }
+
+    public function closingPeriods(): array
+    {
+        return $this->closingPeriods;
     }
 
     public function exceptions(): array
@@ -326,8 +342,14 @@ class OpeningHours
     protected function parseOpeningHoursAndExceptions(array $data): array
     {
         $metaData = Arr::pull($data, 'data', null);
+        $closingPeriods = [];
         $exceptions = [];
         $filters = Arr::pull($data, 'filters', []);
+
+        foreach (Arr::pull($data, 'closing_periods', []) as $start => $end) {
+            $closingPeriods[$start] = $end;
+        }
+
         foreach (Arr::pull($data, 'exceptions', []) as $key => $exception) {
             if (is_callable($exception)) {
                 $filters[] = $exception;
@@ -343,7 +365,7 @@ class OpeningHours
             $openingHours[$this->normalizeDayName($day)] = $openingHoursData;
         }
 
-        return [$openingHours, $exceptions, $metaData, $filters];
+        return [$openingHours, $closingPeriods, $exceptions, $metaData, $filters];
     }
 
     protected function setOpeningHoursFromStrings(string $day, array $openingHours)
@@ -358,6 +380,23 @@ class OpeningHours
         }
 
         $this->openingHours[$day] = OpeningHoursForDay::fromStrings($openingHours)->setData($data);
+    }
+
+    protected function setClosingPeriodsFromStrings(array $closing_periods)
+    {
+        $this->closingPeriods = array_map(function(string $start, string $end) {
+            $recurring = DateTime::createFromFormat('m-d', $start);
+
+            if ($recurring === false || $recurring->format('m-d') !== $start) {
+                $dateTime = DateTime::createFromFormat('Y-m-d', $start);
+
+                if ($dateTime === false || $dateTime->format('Y-m-d') !== $start) {
+                    throw InvalidDate::invalidDate($start);
+                }
+            }
+
+            return ClosingPeriod::fromRange($start, $end);
+        }, array_keys($closing_periods), $closing_periods);
     }
 
     protected function setExceptionsFromStrings(array $exceptions)
