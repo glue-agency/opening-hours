@@ -149,9 +149,32 @@ class OpeningHours
         return $this->setFilters($filters)->setData($metaData);
     }
 
-    public function forWeek(): array
+    public function forRegularWeek(): array
     {
         return $this->openingHours;
+    }
+
+    public function forWeek(): array
+    {
+        $monday = new DateTime('monday this week');
+        $sunday = new DateTime('sunday this week');
+
+        // https://stackoverflow.com/a/38226650/2787376
+        $sunday->setTime(0,0,1);
+
+        $period = new \DatePeriod(
+            $monday,
+            new \DateInterval('P1D'),
+            $sunday
+        );
+
+        $week = [];
+
+        foreach($period as $day) {
+            $week[$day->format('l')] = $this->forDate($day);
+        }
+
+        return $week;
     }
 
     public function forWeekCombined(): array
